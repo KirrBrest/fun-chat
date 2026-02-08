@@ -1,0 +1,19 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+CHANGED="$(git diff --cached --name-only)"
+
+# Puzzle: затронуты файлы Puzzle/
+if echo "$CHANGED" | grep -q "^Puzzle/" && [ -f "$REPO_ROOT/Puzzle/.husky/pre-commit" ]; then
+  cd "$REPO_ROOT/Puzzle" && exec ./.husky/pre-commit
+  exit $?
+fi
+
+# fun-chat: затронуты файлы fun-chat/
+if echo "$CHANGED" | grep -q "^fun-chat/"; then
+  cd "$REPO_ROOT/fun-chat" && npx eslint . --fix && npx prettier --write "src/**/*.{ts,css}" && git add -u
+  exit $?
+fi
+
+exit 0

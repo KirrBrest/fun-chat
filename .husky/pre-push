@@ -1,0 +1,19 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+CURRENT_DIR="$(pwd)"
+
+# Puzzle: пуш из папки Puzzle
+if echo "$CURRENT_DIR" | grep -q "Puzzle" && [ -f "$REPO_ROOT/Puzzle/.husky/pre-push" ]; then
+  cd "$REPO_ROOT/Puzzle" && exec ./.husky/pre-push
+  exit $?
+fi
+
+# fun-chat: пуш из папки fun-chat
+if echo "$CURRENT_DIR" | grep -q "fun-chat"; then
+  cd "$REPO_ROOT/fun-chat" && npm run build
+  exit $?
+fi
+
+exit 0

@@ -1,0 +1,10 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+if [ -z "${1##/*}" ]; then
+  COMMIT_MSG_FILE="$1"
+else
+  COMMIT_MSG_FILE="$REPO_ROOT/$1"
+fi
+cd "$REPO_ROOT/fun-chat" && npx --no-install commitlint --edit "$COMMIT_MSG_FILE"
