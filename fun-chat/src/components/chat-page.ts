@@ -251,29 +251,15 @@ function buildBeginningOfDialog(): Tag {
   return div;
 }
 
-function appendSelectedDialogContent(
-  state: AppState,
-  wrap: Tag,
+function appendMessagesWithDivider(
+  sorted: WsChatMessage[],
+  currentLogin: string,
+  showDivider: boolean,
   messagesContainer: Tag,
   onDeleteMessage: (messageId: string) => void,
   onEditMessage: (messageId: string, text: string) => void,
   onCancelEdit: () => void
 ): void {
-  const selectedLogin = state.chat.selectedUserLogin;
-  if (selectedLogin === null) return;
-  const currentLogin = state.auth.user?.name ?? '';
-  const selectedUser = state.chat.listUsers.find((u) => u.login === selectedLogin);
-  const isOnline =
-    selectedUser?.isOnline ?? state.chat.onlineUsers.includes(selectedLogin);
-  wrap.append(buildDialogHeader(selectedLogin, isOnline).element);
-  const sorted = [...state.chat.messagesWithSelected].sort(
-    (a, b) => a.datetime - b.datetime
-  );
-  if (sorted.length > 0) {
-    messagesContainer.element.append(buildBeginningOfDialog().element);
-  }
-  const showDivider =
-    !state.chat.unreadDividerDismissedForSelected && currentLogin !== '';
   let dividerInserted = false;
   for (const msg of sorted) {
     const isIncoming = msg.from !== currentLogin;
@@ -291,6 +277,42 @@ function appendSelectedDialogContent(
       ).element
     );
   }
+}
+
+function appendSelectedDialogContent(
+  state: AppState,
+  wrap: Tag,
+  messagesContainer: Tag,
+  onDeleteMessage: (messageId: string) => void,
+  onEditMessage: (messageId: string, text: string) => void,
+  onCancelEdit: () => void
+): void {
+  const selectedLogin = state.chat.selectedUserLogin;
+  if (selectedLogin === null) return;
+  const currentLogin = state.auth.user?.name ?? '';
+  const selectedUser = state.chat.listUsers.find(
+    (u) => u.login === selectedLogin
+  );
+  const isOnline =
+    selectedUser?.isOnline ?? state.chat.onlineUsers.includes(selectedLogin);
+  wrap.append(buildDialogHeader(selectedLogin, isOnline).element);
+  const sorted = [...state.chat.messagesWithSelected].sort(
+    (a, b) => a.datetime - b.datetime
+  );
+  if (sorted.length > 0) {
+    messagesContainer.element.append(buildBeginningOfDialog().element);
+  }
+  const showDivider =
+    !state.chat.unreadDividerDismissedForSelected && currentLogin !== '';
+  appendMessagesWithDivider(
+    sorted,
+    currentLogin,
+    showDivider,
+    messagesContainer,
+    onDeleteMessage,
+    onEditMessage,
+    onCancelEdit
+  );
 }
 
 function buildDialogArea(
@@ -400,8 +422,12 @@ function buildChatLayout(
 }
 
 function scrollMessagesToBottom(messagesElement: HTMLElement): void {
-  requestAnimationFrame(() => {
+  const scroll = (): void => {
     messagesElement.scrollTop = messagesElement.scrollHeight;
+  };
+  requestAnimationFrame(() => {
+    scroll();
+    requestAnimationFrame(scroll);
   });
 }
 

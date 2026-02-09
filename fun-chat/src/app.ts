@@ -702,7 +702,7 @@ function handleMsgFromUserPush(payload: unknown): void {
     const prev = appState.chat.unreadCounts[fromLogin] ?? 0;
     setUnreadCountForLogin(fromLogin, prev + 1);
   }
-  renderCurrentRoute(ROUTE_PATHS.chat);
+  renderCurrentRoute(lastRenderedPath);
 }
 
 function handleMsgDeliver(payload: unknown): void {
@@ -776,6 +776,54 @@ function isMsgFromUserPush(payload: unknown): boolean {
   );
 }
 
+function dispatchTypedPush(msg: WsMessageBase): boolean {
+  if (
+    msg.type === WS_MESSAGE_TYPE.MSG_FROM_USER &&
+    msg.id === null &&
+    isMsgFromUserPush(msg.payload)
+  ) {
+    handleMsgFromUserPush(msg.payload);
+    return true;
+  }
+  if (msg.type === WS_MESSAGE_TYPE.MSG_DELIVER) {
+    handleMsgDeliver(msg.payload);
+    return true;
+  }
+  if (msg.type === WS_MESSAGE_TYPE.MSG_READ && msg.id === null) {
+    handleMsgRead(msg.payload);
+    return true;
+  }
+  if (msg.type === WS_MESSAGE_TYPE.MSG_DELETE && msg.id === null) {
+    handleMsgDelete(msg.payload);
+    return true;
+  }
+  if (msg.type === WS_MESSAGE_TYPE.MSG_EDIT && msg.id === null) {
+    handleMsgEdit(msg.payload);
+    return true;
+  }
+  if (
+    msg.type === WS_MESSAGE_TYPE.MSG_COUNT_NOT_READED_FROM_USER &&
+    msg.id === null
+  ) {
+    handleMsgCountPush(msg.payload);
+    return true;
+  }
+  return false;
+}
+
+function tryHandleIncomingMessagePush(msg: WsMessageBase): void {
+  if (msg.id !== null) return;
+  const parsed = parseMessagePayload(msg.payload);
+  const currentUser = appState.auth.user;
+  if (
+    parsed !== null &&
+    currentUser !== null &&
+    parsed.to === currentUser.name
+  ) {
+    handleMsgFromUserPush(msg.payload);
+  }
+}
+
 function handleWsMessage(msg: WsMessageBase): void {
   const isExternal =
     msg.type === WS_MESSAGE_TYPE.USER_EXTERNAL_LOGIN ||
@@ -785,42 +833,8 @@ function handleWsMessage(msg: WsMessageBase): void {
     handleExternalUserMessage(msg.type, msg.payload);
     return;
   }
-
-  if (
-    msg.type === WS_MESSAGE_TYPE.MSG_FROM_USER &&
-    msg.id === null &&
-    isMsgFromUserPush(msg.payload)
-  ) {
-    handleMsgFromUserPush(msg.payload);
-    return;
-  }
-
-  if (msg.type === WS_MESSAGE_TYPE.MSG_DELIVER) {
-    handleMsgDeliver(msg.payload);
-    return;
-  }
-
-  if (msg.type === WS_MESSAGE_TYPE.MSG_READ && msg.id === null) {
-    handleMsgRead(msg.payload);
-    return;
-  }
-
-  if (msg.type === WS_MESSAGE_TYPE.MSG_DELETE && msg.id === null) {
-    handleMsgDelete(msg.payload);
-    return;
-  }
-
-  if (msg.type === WS_MESSAGE_TYPE.MSG_EDIT && msg.id === null) {
-    handleMsgEdit(msg.payload);
-    return;
-  }
-
-  if (
-    msg.type === WS_MESSAGE_TYPE.MSG_COUNT_NOT_READED_FROM_USER &&
-    msg.id === null
-  ) {
-    handleMsgCountPush(msg.payload);
-  }
+  if (dispatchTypedPush(msg)) return;
+  tryHandleIncomingMessagePush(msg);
 }
 
 function getReconnectDelayMsValue(): number {

@@ -96,7 +96,9 @@ export function parseMessagePayload(payload: unknown): WsChatMessage | null {
     'message'
   )?.value;
 
-  return parseMessageObject(messageVal);
+  const fromWrapper = parseMessageObject(messageVal);
+  if (fromWrapper !== null) return fromWrapper;
+  return parseMessageObject(payload);
 }
 
 function parseMessagesArray(payload: unknown): WsChatMessage[] {
