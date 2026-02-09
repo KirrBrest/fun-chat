@@ -1,3 +1,5 @@
+import type { WsChatMessage } from './ws-types';
+
 export const APP_NAME = 'Fun Chat' as const;
 
 export const ROUTE_PATHS = {
@@ -29,6 +31,9 @@ export interface ChatState {
   onlineUsers: string[];
   listUsers: ListUser[];
   unreadCounts: Record<string, number>;
+  selectedUserLogin: string | null;
+  messagesWithSelected: WsChatMessage[];
+  unreadDividerDismissedForSelected: boolean;
 }
 
 export interface AppState {

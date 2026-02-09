@@ -6,10 +6,23 @@ import {
   onMessage,
   onResponse,
   onUnexpectedClose,
+  parseCountPushPayload,
+  parseMessagePayload,
+  parseMsgDeliverPayload,
+  parseMsgDeletePayload,
+  parseMsgEditPayload,
+  parseMsgReadPayload,
   requestActiveUsers,
   requestInactiveUsers,
   send,
 } from './api';
+import {
+  deleteMessage,
+  editMessage,
+  getMessageHistory,
+  markAsRead,
+  sendMessage,
+} from './api/messages';
 import { createAboutPage } from './components/about-page';
 import { createAuthPage } from './components/auth-page';
 import { createChatPage } from './components/chat-page';
@@ -46,6 +59,7 @@ import {
 import { isRoutePath } from './types/type-guards';
 import {
   WS_MESSAGE_TYPE,
+  type WsChatMessage,
   type WsErrorPayload,
   type WsExternalUserPayload,
   type WsMessageBase,
@@ -72,6 +86,10 @@ export function doLogout(onNavigate: (path: RoutePath) => void): void {
   appState.auth.user = null;
   appState.chat.listUsers = [];
   appState.chat.onlineUsers = [];
+  appState.chat.unreadCounts = {};
+  appState.chat.selectedUserLogin = null;
+  appState.chat.messagesWithSelected = [];
+  appState.chat.unreadDividerDismissedForSelected = false;
   chatUsersListLoaded = false;
   onNavigate(ROUTE_PATHS.login);
 }
@@ -86,6 +104,9 @@ const initialChatState: ChatState = {
   onlineUsers: [],
   listUsers: [],
   unreadCounts: {},
+  selectedUserLogin: null,
+  messagesWithSelected: [],
+  unreadDividerDismissedForSelected: false,
 };
 
 const appState: AppState = {
@@ -113,24 +134,20 @@ function toUnreadCount(raw: unknown): number {
   return num;
 }
 
-function copyUnreadCountsToRecord(): Record<string, number> {
-  return {};
-}
-
 function buildListUsers(
   activeLogins: string[],
   inactiveLogins: string[],
   onlineLogins: string[],
-  currentLogin: string
+  currentLogin: string,
+  unreadCounts: Record<string, number>
 ): ListUser[] {
   const seen = new Set<string>();
   const result: ListUser[] = [];
-  const counts = copyUnreadCountsToRecord();
 
   for (const login of activeLogins) {
     if (seen.has(login) || login === currentLogin) continue;
     seen.add(login);
-    const n = counts[login];
+    const n = unreadCounts[login];
     result.push({
       login,
       isOnline: true,
@@ -141,7 +158,7 @@ function buildListUsers(
   for (const login of inactiveLogins) {
     if (seen.has(login) || login === currentLogin) continue;
     seen.add(login);
-    const n = counts[login];
+    const n = unreadCounts[login];
     result.push({
       login,
       isOnline: onlineLogins.includes(login),
@@ -150,6 +167,21 @@ function buildListUsers(
   }
 
   return result;
+}
+
+function setUnreadCountForLogin(login: string, count: number): void {
+  appState.chat.unreadCounts[login] = count;
+  const next: ListUser[] = [];
+  for (const u of appState.chat.listUsers) {
+    const l = u.login;
+    const n = l === login ? toUnreadCount(count) : u.unreadCount;
+    next.push({
+      login: l,
+      isOnline: u.isOnline,
+      unreadCount: n,
+    });
+  }
+  appState.chat.listUsers = next;
 }
 
 function loadChatUsers(currentUserLogin: string): void {
@@ -167,7 +199,8 @@ function loadChatUsers(currentUserLogin: string): void {
         activeLogins,
         inactiveLogins,
         appState.chat.onlineUsers,
-        currentUserLogin
+        currentUserLogin,
+        appState.chat.unreadCounts
       );
       appState.chat.listUsers = list;
       chatUsersListLoaded = true;
@@ -294,9 +327,111 @@ function handleAuthSubmit(
     });
 }
 
+function selectUserAndLoadHistory(login: string): void {
+  appState.chat.selectedUserLogin = login;
+  appState.chat.unreadDividerDismissedForSelected = false;
+  appState.chat.messagesWithSelected = [];
+
+  void getMessageHistory(login)
+    .then((msgs: WsChatMessage[]) => {
+      appState.chat.messagesWithSelected = msgs;
+      renderCurrentRoute(ROUTE_PATHS.chat);
+    })
+    .catch(() => {
+      renderCurrentRoute(ROUTE_PATHS.chat);
+    });
+}
+
+function dismissUnreadDivider(): void {
+  appState.chat.unreadDividerDismissedForSelected = true;
+  const currentUser = appState.auth.user;
+  if (currentUser === null) {
+    renderCurrentRoute(ROUTE_PATHS.chat);
+  } else {
+    const toMark = appState.chat.messagesWithSelected.filter(
+      (m) => m.from !== currentUser.name && !m.status.isReaded
+    );
+    if (toMark.length > 0) {
+      void Promise.all(toMark.map((m) => markAsRead(m.id))).then(() => {
+        renderCurrentRoute(ROUTE_PATHS.chat);
+      });
+    } else {
+      renderCurrentRoute(ROUTE_PATHS.chat);
+    }
+  }
+}
+
+function sendMessageFromDialog(text: string): void {
+  const to = appState.chat.selectedUserLogin;
+  if (to === null) return;
+  if (text.trim() === '') return;
+
+  void sendMessage(to, text.trim())
+    .then((msg: WsChatMessage) => {
+      appState.chat.messagesWithSelected = [
+        ...appState.chat.messagesWithSelected,
+        msg,
+      ];
+      renderCurrentRoute(ROUTE_PATHS.chat);
+    })
+    .catch(() => {
+      renderCurrentRoute(ROUTE_PATHS.chat);
+    });
+}
+
+function deleteMessageFromDialog(messageId: string): void {
+  void deleteMessage(messageId)
+    .then((result) => {
+      if (result.isDeleted) {
+        appState.chat.messagesWithSelected =
+          appState.chat.messagesWithSelected.filter((m) => m.id !== messageId);
+      }
+      renderCurrentRoute(ROUTE_PATHS.chat);
+    })
+    .catch(() => {
+      renderCurrentRoute(ROUTE_PATHS.chat);
+    });
+}
+
+function editMessageFromDialog(messageId: string, text: string): void {
+  const trimmed = text.trim();
+  if (trimmed === '') return;
+
+  void editMessage(messageId, trimmed)
+    .then((result) => {
+      const list = appState.chat.messagesWithSelected;
+      const next = list.map((m) =>
+        m.id === result.id
+          ? {
+              ...m,
+              text: result.text,
+              status: { ...m.status, isEdited: result.isEdited },
+            }
+          : m
+      );
+      appState.chat.messagesWithSelected = next;
+      renderCurrentRoute(ROUTE_PATHS.chat);
+    })
+    .catch(() => {
+      renderCurrentRoute(ROUTE_PATHS.chat);
+    });
+}
+
+function reRenderChat(): void {
+  renderCurrentRoute(ROUTE_PATHS.chat);
+}
+
 function createPageForPath(path: RoutePath): HTMLElement {
   if (path === ROUTE_PATHS.chat) {
-    return createChatPage(appState);
+    return createChatPage(
+      appState,
+      selectUserAndLoadHistory,
+      dismissUnreadDivider,
+      sendMessageFromDialog,
+      deleteMessageFromDialog,
+      editMessageFromDialog,
+      reRenderChat
+    );
   }
 
   if (path === ROUTE_PATHS.about) {
@@ -545,16 +680,147 @@ function restoreSession(userName: string, password: string): Promise<boolean> {
     });
 }
 
+function handleMsgFromUserPush(payload: unknown): void {
+  const message = parseMessagePayload(payload);
+  if (message === null) return;
+
+  const currentUser = appState.auth.user;
+  if (currentUser === null) return;
+  if (message.to !== currentUser.name) return;
+
+  const fromLogin = message.from;
+  if (appState.chat.selectedUserLogin === fromLogin) {
+    appState.chat.messagesWithSelected = [
+      ...appState.chat.messagesWithSelected,
+      message,
+    ];
+    appState.chat.unreadDividerDismissedForSelected = true;
+    void markAsRead(message.id);
+  }
+
+  if (appState.chat.selectedUserLogin !== fromLogin) {
+    const prev = appState.chat.unreadCounts[fromLogin] ?? 0;
+    setUnreadCountForLogin(fromLogin, prev + 1);
+  }
+  renderCurrentRoute(ROUTE_PATHS.chat);
+}
+
+function handleMsgDeliver(payload: unknown): void {
+  const parsed = parseMsgDeliverPayload(payload);
+  if (parsed === null) return;
+
+  const list = appState.chat.messagesWithSelected;
+  const next = list.map((m) =>
+    m.id === parsed.id
+      ? { ...m, status: { ...m.status, isDelivered: parsed.isDelivered } }
+      : m
+  );
+  appState.chat.messagesWithSelected = next;
+  renderCurrentRoute(ROUTE_PATHS.chat);
+}
+
+function handleMsgRead(payload: unknown): void {
+  const parsed = parseMsgReadPayload(payload);
+  if (parsed === null) return;
+
+  const list = appState.chat.messagesWithSelected;
+  const next = list.map((m) =>
+    m.id === parsed.id
+      ? { ...m, status: { ...m.status, isReaded: parsed.isReaded } }
+      : m
+  );
+  appState.chat.messagesWithSelected = next;
+  renderCurrentRoute(ROUTE_PATHS.chat);
+}
+
+function handleMsgDelete(payload: unknown): void {
+  const parsed = parseMsgDeletePayload(payload);
+  if (parsed === null || !parsed.isDeleted) return;
+
+  appState.chat.messagesWithSelected =
+    appState.chat.messagesWithSelected.filter((m) => m.id !== parsed.id);
+  renderCurrentRoute(ROUTE_PATHS.chat);
+}
+
+function handleMsgEdit(payload: unknown): void {
+  const parsed = parseMsgEditPayload(payload);
+  if (parsed === null) return;
+
+  const list = appState.chat.messagesWithSelected;
+  const next = list.map((m) =>
+    m.id === parsed.id
+      ? {
+          ...m,
+          text: parsed.text,
+          status: { ...m.status, isEdited: parsed.isEdited },
+        }
+      : m
+  );
+  appState.chat.messagesWithSelected = next;
+  renderCurrentRoute(ROUTE_PATHS.chat);
+}
+
+function handleMsgCountPush(payload: unknown): void {
+  const parsed = parseCountPushPayload(payload);
+  if (parsed === null) return;
+
+  setUnreadCountForLogin(parsed.login, parsed.count);
+  renderCurrentRoute(ROUTE_PATHS.chat);
+}
+
+function isMsgFromUserPush(payload: unknown): boolean {
+  if (typeof payload !== 'object' || payload === null) return false;
+  return (
+    Object.getOwnPropertyDescriptor(payload, 'message') !== undefined &&
+    Object.getOwnPropertyDescriptor(payload, 'messages') === undefined
+  );
+}
+
 function handleWsMessage(msg: WsMessageBase): void {
   const isExternal =
     msg.type === WS_MESSAGE_TYPE.USER_EXTERNAL_LOGIN ||
     msg.type === WS_MESSAGE_TYPE.USER_EXTERNAL_LOGOUT;
 
-  if (!isExternal || !isExternalUserPayload(msg.payload)) {
+  if (isExternal && isExternalUserPayload(msg.payload)) {
+    handleExternalUserMessage(msg.type, msg.payload);
     return;
   }
 
-  handleExternalUserMessage(msg.type, msg.payload);
+  if (
+    msg.type === WS_MESSAGE_TYPE.MSG_FROM_USER &&
+    msg.id === null &&
+    isMsgFromUserPush(msg.payload)
+  ) {
+    handleMsgFromUserPush(msg.payload);
+    return;
+  }
+
+  if (msg.type === WS_MESSAGE_TYPE.MSG_DELIVER) {
+    handleMsgDeliver(msg.payload);
+    return;
+  }
+
+  if (msg.type === WS_MESSAGE_TYPE.MSG_READ && msg.id === null) {
+    handleMsgRead(msg.payload);
+    return;
+  }
+
+  if (msg.type === WS_MESSAGE_TYPE.MSG_DELETE && msg.id === null) {
+    handleMsgDelete(msg.payload);
+    return;
+  }
+
+  if (msg.type === WS_MESSAGE_TYPE.MSG_EDIT && msg.id === null) {
+    handleMsgEdit(msg.payload);
+    return;
+  }
+
+  if (
+    msg.type === WS_MESSAGE_TYPE.MSG_COUNT_NOT_READED_FROM_USER &&
+    msg.id === null
+  ) {
+    handleMsgCountPush(msg.payload);
+  }
 }
 
 function getReconnectDelayMsValue(): number {
