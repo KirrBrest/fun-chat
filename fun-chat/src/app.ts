@@ -5,6 +5,7 @@ import {
   isConnected,
   onMessage,
   onResponse,
+  onUnexpectedClose,
   requestActiveUsers,
   requestInactiveUsers,
   send,
@@ -14,7 +15,17 @@ import { createAuthPage } from './components/auth-page';
 import { createChatPage } from './components/chat-page';
 import { createFooter } from './components/footer';
 import { createHeader } from './components/header';
-import { CHAT_SERVER_WS_URL, MIN_UNREAD_COUNT } from './constants';
+import {
+  CHAT_SERVER_WS_URL,
+  CONNECTION_LOST_MESSAGE,
+  MIN_UNREAD_COUNT,
+  RECONNECT_DELAY_MS,
+} from './constants';
+import {
+  createConnectionHandler,
+  toConnectionLostMessage,
+  type ConnectionHandler,
+} from './utils/connection-handler';
 import {
   clearCurrentUser,
   clearSessionPassword,
@@ -85,6 +96,8 @@ const appState: AppState = {
 let rootElement: HTMLElement | null = null;
 
 let chatUsersListLoaded = false;
+let connectionHandler: ConnectionHandler | null = null;
+let lastRenderedPath: RoutePath = ROUTE_PATHS.login;
 
 function getLoginFromUserItem(item: WsUserItem): string {
   const desc = Object.getOwnPropertyDescriptor(item, 'login');
@@ -296,6 +309,18 @@ function createPageForPath(path: RoutePath): HTMLElement {
   return createAuthPage(mode, handleAuthSubmit);
 }
 
+function maybeLoadChatUsers(path: RoutePath): void {
+  const onChat = path === ROUTE_PATHS.chat;
+  const connected = isConnected();
+  const currentUser = appState.auth.user;
+  const shouldLoadUsers =
+    onChat && connected && currentUser !== null && !chatUsersListLoaded;
+
+  if (shouldLoadUsers && currentUser !== null) {
+    loadChatUsers(currentUser.name);
+  }
+}
+
 function renderCurrentRoute(path: RoutePath): void {
   if (rootElement === null) {
     return;
@@ -317,7 +342,9 @@ function renderCurrentRoute(path: RoutePath): void {
     return;
   }
 
+  lastRenderedPath = normalizedPath;
   clearRoot();
+  connectionHandler?.appendBanner(rootElement);
 
   const headerElement: HTMLElement = createHeader(
     appState,
@@ -336,15 +363,7 @@ function renderCurrentRoute(path: RoutePath): void {
   rootElement.append(mainContainer.element);
   rootElement.append(footerElement);
 
-  const onChat = normalizedPath === ROUTE_PATHS.chat;
-  const connected = isConnected();
-  const currentUser = appState.auth.user;
-  const shouldLoadUsers =
-    onChat && connected && currentUser !== null && !chatUsersListLoaded;
-
-  if (shouldLoadUsers && currentUser !== null) {
-    loadChatUsers(currentUser.name);
-  }
+  maybeLoadChatUsers(normalizedPath);
 }
 
 export function navigate(path: RoutePath, replace: boolean = false): void {
@@ -526,35 +545,23 @@ function restoreSession(userName: string, password: string): Promise<boolean> {
     });
 }
 
-export function initApp(root: HTMLElement): void {
-  rootElement = root;
+function handleWsMessage(msg: WsMessageBase): void {
+  const isExternal =
+    msg.type === WS_MESSAGE_TYPE.USER_EXTERNAL_LOGIN ||
+    msg.type === WS_MESSAGE_TYPE.USER_EXTERNAL_LOGOUT;
 
-  onMessage((msg: WsMessageBase) => {
-    const isExternal =
-      msg.type === WS_MESSAGE_TYPE.USER_EXTERNAL_LOGIN ||
-      msg.type === WS_MESSAGE_TYPE.USER_EXTERNAL_LOGOUT;
-
-    if (!isExternal || !isExternalUserPayload(msg.payload)) {
-      return;
-    }
-
-    const payload: WsExternalUserPayload = msg.payload;
-    handleExternalUserMessage(msg.type, payload);
-  });
-
-  const currentPathname: string = globalThis.location.pathname;
-  const initialPath: RoutePath = normalizePath(currentPathname);
-
-  if (currentPathname !== initialPath) {
-    globalThis.history.replaceState(null, '', initialPath);
+  if (!isExternal || !isExternalUserPayload(msg.payload)) {
+    return;
   }
 
-  globalThis.addEventListener('popstate', () => {
-    const newPath: RoutePath = normalizePath(globalThis.location.pathname);
+  handleExternalUserMessage(msg.type, msg.payload);
+}
 
-    renderCurrentRoute(newPath);
-  });
+function getReconnectDelayMsValue(): number {
+  return RECONNECT_DELAY_MS;
+}
 
+function setupInitialRoute(initialPath: RoutePath): void {
   const storedUser = getCurrentUser();
   const storedPassword = getSessionPassword();
 
@@ -572,4 +579,51 @@ export function initApp(root: HTMLElement): void {
   } else {
     renderCurrentRoute(initialPath);
   }
+}
+
+export function initApp(root: HTMLElement): void {
+  rootElement = root;
+
+  connectionHandler = createConnectionHandler({
+    wsUrl: CHAT_SERVER_WS_URL,
+    getReconnectDelayMs: getReconnectDelayMsValue,
+    connectionLostMessageText: toConnectionLostMessage(CONNECTION_LOST_MESSAGE),
+    getCredentials: () => {
+      const userName = getCurrentUser();
+      const password = getSessionPassword();
+
+      return userName !== null && password !== null
+        ? { userName, password }
+        : null;
+    },
+    restoreSession,
+    getLastRenderedPath: () => lastRenderedPath,
+    render: renderCurrentRoute,
+    onReauthSuccess: () => {
+      chatUsersListLoaded = false;
+      if (globalThis.location.pathname !== ROUTE_PATHS.chat) {
+        globalThis.history.replaceState(null, '', ROUTE_PATHS.chat);
+      }
+      renderCurrentRoute(ROUTE_PATHS.chat);
+    },
+    onReauthFail: () => renderCurrentRoute(lastRenderedPath),
+  });
+
+  onUnexpectedClose(() => connectionHandler?.handleUnexpectedClose());
+  onMessage(handleWsMessage);
+
+  const currentPathname: string = globalThis.location.pathname;
+  const initialPath: RoutePath = normalizePath(currentPathname);
+
+  lastRenderedPath = initialPath;
+
+  if (currentPathname !== initialPath) {
+    globalThis.history.replaceState(null, '', initialPath);
+  }
+
+  globalThis.addEventListener('popstate', () => {
+    renderCurrentRoute(normalizePath(globalThis.location.pathname));
+  });
+
+  setupInitialRoute(initialPath);
 }

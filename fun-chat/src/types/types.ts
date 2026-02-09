@@ -45,3 +45,9 @@ export type AuthSubmitHandler = (
 ) => void;
 
 export type NavigateHandler = (path: RoutePath) => void;
+
+export type ConnectionHandlerOptions =
+  import('../utils/connection-handler').ConnectionHandlerOptions;
+
+export type ConnectionHandler =
+  import('../utils/connection-handler').ConnectionHandler;

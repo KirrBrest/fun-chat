@@ -1,5 +1,6 @@
 #!/usr/bin/env sh
-. "$(dirname -- "$0")/_/husky.sh"
+# Husky 4 legacy (not used in Husky 8+):
+# . "$(dirname -- "$0")/_/husky.sh"
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 CURRENT_DIR="$(pwd)"

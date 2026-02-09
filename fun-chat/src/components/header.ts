@@ -12,7 +12,7 @@ import {
 const REGISTRATION_LABEL = 'Register';
 const LOGIN_LABEL = 'Sign in';
 const LOGOUT_LABEL = 'Log out';
-const ABOUT_LABEL = 'About us';
+const ABOUT_LABEL = 'About';
 
 function getAuthModeByPath(path: RoutePath): AuthPageMode {
   if (path === ROUTE_PATHS.register) {

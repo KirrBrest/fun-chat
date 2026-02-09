@@ -1,3 +1,4 @@
+import { RECONNECT_DELAY_MS } from '../constants';
 import { ROUTE_PATHS, RoutePath } from './types';
 import {
   type WsErrorPayload,
@@ -97,4 +98,10 @@ export function isWsExternalUserPayload(
   )?.value;
 
   return typeof loginVal === 'string';
+}
+
+export function toReconnectDelayMs(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? value
+    : RECONNECT_DELAY_MS;
 }

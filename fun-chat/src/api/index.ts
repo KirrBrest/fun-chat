@@ -5,6 +5,7 @@ export {
   isConnected,
   onMessage,
   onResponse,
+  onUnexpectedClose,
   send,
 } from './chat-socket';
 

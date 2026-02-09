@@ -42,6 +42,14 @@ body {
   margin-top: auto;
 }
 
+.app-connection-banner {
+  padding: 10px 24px;
+  background-color: #7f1d1d;
+  color: #fecaca;
+  text-align: center;
+  font-size: 14px;
+}
+
 .app-title {
   margin: 0;
   font-weight: 600;
@@ -122,6 +130,71 @@ body {
   flex-direction: column;
   min-height: 0;
   min-width: 0;
+}
+
+.about-page {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.about-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.about-heading {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #e5e7eb;
+}
+
+.about-text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #9ca3af;
+}
+
+.about-author-content {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.about-author-photo {
+  width: 240px;
+  height: 240px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.about-author-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.about-author-name {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #e5e7eb;
+}
+
+.about-github-link {
+  margin-top: 6px;
+  font-size: 14px;
+  color: #6366f1;
+  text-decoration: none;
+}
+
+.about-github-link:hover {
+  text-decoration: underline;
 }
 
 .chat-layout {

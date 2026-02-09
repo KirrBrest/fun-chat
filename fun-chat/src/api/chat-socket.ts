@@ -4,8 +4,10 @@ import type { WsMessageBase } from '../types/ws-types';
 type ResponseCallback = (message: WsMessageBase) => void;
 
 let socket: WebSocket | null = null;
+let intentionalClose = false;
 const responseHandlers = new Map<string, ResponseCallback>();
 const messageListeners: ResponseCallback[] = [];
+const unexpectedCloseListeners: Array<() => void> = [];
 
 function generateId(): string {
   const radix = Number(RADIX);
@@ -71,6 +73,7 @@ export function connect(url: string): Promise<void> {
     const ws = new WebSocket(url);
 
     ws.addEventListener('open', () => {
+      intentionalClose = false;
       socket = ws;
       resolve();
     });
@@ -81,6 +84,12 @@ export function connect(url: string): Promise<void> {
 
     ws.addEventListener('close', () => {
       socket = null;
+      if (!intentionalClose) {
+        for (const listener of unexpectedCloseListeners) {
+          listener();
+        }
+      }
+      intentionalClose = false;
     });
 
     ws.addEventListener('message', handleMessage);
@@ -107,12 +116,17 @@ export function onMessage(callback: ResponseCallback): void {
 }
 
 export function close(): void {
+  intentionalClose = true;
   if (socket !== null) {
     socket.close();
     socket = null;
   }
 
   responseHandlers.clear();
+}
+
+export function onUnexpectedClose(callback: () => void): void {
+  unexpectedCloseListeners.push(callback);
 }
 
 export function createRequestId(): string {
